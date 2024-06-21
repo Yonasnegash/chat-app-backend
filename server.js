@@ -4,6 +4,9 @@ const mongoose = require("mongoose");
 const bodyParser = require("body-parser");
 const WebSocket = require("ws");
 const cors = require("cors");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
 // Connect to MongoDB
 mongoose.connect("mongodb://127.0.0.1:27017/chat");
@@ -19,6 +22,22 @@ const messageSchema = new mongoose.Schema({
 // Create a message model
 const Message = mongoose.model("Message", messageSchema);
 
+// Check if /uploads directory exists, if not, create it
+const uploadsDir = path.join(__dirname, "uploads");
+
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
@@ -26,16 +45,26 @@ app.use(cors());
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+const upload = multer({ storage });
+
+// Serve static files from uploads directory
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 // Send message API
-app.post("/send", async (req, res) => {
+app.post("/send", upload.single("file"), async (req, res) => {
   try {
-    if (!req.body.message) {
+    if (!req.file && !req.body.message) {
       return res.status(400).json({ message: "No content to upload" });
     }
+
+    const fileLink = req.file
+      ? `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`
+      : "";
 
     const newMessage = new Message({
       username: req.body.username,
       message: req.body.message || "",
+      fileLink: fileLink,
       timestamp: new Date(),
     });
 
@@ -76,6 +105,7 @@ wss.on("connection", async (ws) => {
       const newMessage = new Message({
         username: parsedData.username,
         message: parsedData.message,
+        fileLink: parsedData.fileLink,
         timestamp: new Date(),
       });
 
